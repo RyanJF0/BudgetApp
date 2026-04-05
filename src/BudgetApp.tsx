@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion'
 import { Plus } from 'lucide-react'
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -14,25 +14,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-
-const initialCategories = [
-  { id: 'groceries', name: 'Groceries', budget: 550, color: '#3b82f6' },
-  { id: 'takeout', name: 'Take out', budget: 130, color: '#10b981' },
-  { id: 'entertainment', name: 'Entertainment', budget: 50, color: '#f59e0b' },
-]
-
-const categoryColors = [
-  '#3b82f6',
-  '#10b981',
-  '#f59e0b',
-  '#ef4444',
-  '#8b5cf6',
-  '#06b6d4',
-  '#84cc16',
-  '#f97316',
-  '#ec4899',
-  '#14b8a6',
-]
+import { useBudgetData } from '@/hooks/useBudgetData'
 
 const currency = new Intl.NumberFormat('en-AU', {
   style: 'currency',
@@ -40,28 +22,40 @@ const currency = new Intl.NumberFormat('en-AU', {
   maximumFractionDigits: 2,
 })
 
-type Expense = {
-  id: string
-  categoryId: string
-  amount: number
-  description?: string
-}
-
 function formatMoney(value: number) {
   return currency.format(value || 0)
 }
 
-export default function BudgetApp() {
-  const [categories, setCategories] = useState(initialCategories)
-  const [expenses, setExpenses] = useState<Expense[]>([])
+type BudgetAppProps = {
+  userId: string
+}
+
+export default function BudgetApp({ userId }: BudgetAppProps) {
+  const {
+    categories,
+    expenses,
+    loading,
+    error,
+    updateCategory,
+    addExpense: persistExpense,
+    addCategory,
+    flushPendingCategories,
+  } = useBudgetData(userId)
+
   const [open, setOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
-  const [categoryId, setCategoryId] = useState(initialCategories[0].id)
+  const [categoryId, setCategoryId] = useState('')
   const [amount, setAmount] = useState('')
   const [description, setDescription] = useState('')
   const [expenseDetailCategoryId, setExpenseDetailCategoryId] = useState<string | null>(
     null
   )
+
+  useEffect(() => {
+    if (categories.length > 0 && !categories.some((c) => c.id === categoryId)) {
+      setCategoryId(categories[0].id)
+    }
+  }, [categories, categoryId])
 
   const totalBudget = categories.reduce((sum, c) => sum + c.budget, 0)
 
@@ -121,20 +115,13 @@ export default function BudgetApp() {
       .reverse()
   }, [expenses, expenseDetailCategoryId])
 
-  function addExpense(e: FormEvent) {
+  async function addExpense(e: FormEvent) {
     e.preventDefault()
     const parsed = Number(amount)
     if (!categoryId || !Number.isFinite(parsed) || parsed <= 0) return
 
-    setExpenses((current) => [
-      ...current,
-      {
-        id: crypto.randomUUID(),
-        categoryId,
-        amount: parsed,
-        description: description.trim(),
-      },
-    ])
+    const ok = await persistExpense(categoryId, parsed, description.trim())
+    if (!ok) return
 
     setAmount('')
     setCategoryId(categories[0]?.id ?? '')
@@ -142,35 +129,12 @@ export default function BudgetApp() {
     setOpen(false)
   }
 
-  function updateCategory(id: string, field: 'name' | 'budget', value: string) {
-    setCategories((current) =>
-      current.map((category) => {
-        if (category.id !== id) return category
-        if (field === 'budget') {
-          const parsed = Number(value)
-          return { ...category, budget: Number.isFinite(parsed) ? parsed : 0 }
-        }
-        return { ...category, name: value }
-      })
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">
+        Loading your budget…
+      </div>
     )
-  }
-
-  function addCategory() {
-    const id = crypto.randomUUID()
-    const usedColors = new Set(categories.map((category) => category.color))
-    const nextColor =
-      categoryColors.find((color) => !usedColors.has(color)) ??
-      categoryColors[categories.length % categoryColors.length]
-
-    setCategories((current) => [
-      ...current,
-      {
-        id,
-        name: 'New category',
-        budget: 0,
-        color: nextColor,
-      },
-    ])
   }
 
   return (
@@ -181,11 +145,22 @@ export default function BudgetApp() {
         transition={{ duration: 0.25 }}
         className="w-full max-w-sm"
       >
+        {error ? (
+          <p className="text-destructive mb-3 text-center text-sm" role="alert">
+            {error}
+          </p>
+        ) : null}
         <Card className="rounded-[2rem] border-0 shadow-lg">
           <CardContent className="p-5">
             <div className="mb-4 flex items-center justify-between">
               <div>
-                <Dialog open={editOpen} onOpenChange={setEditOpen}>
+                <Dialog
+                  open={editOpen}
+                  onOpenChange={(next) => {
+                    if (!next) void flushPendingCategories()
+                    setEditOpen(next)
+                  }}
+                >
                   <DialogTrigger
                     render={<button type="button" className="text-left" />}
                   >
@@ -231,7 +206,7 @@ export default function BudgetApp() {
                         type="button"
                         variant="outline"
                         className="w-full rounded-xl"
-                        onClick={addCategory}
+                        onClick={() => void addCategory()}
                       >
                         Add category
                       </Button>
@@ -250,7 +225,7 @@ export default function BudgetApp() {
                     <DialogTitle>Add expense</DialogTitle>
                   </DialogHeader>
 
-                  <form onSubmit={addExpense} className="space-y-4 pt-2">
+                  <form onSubmit={(e) => void addExpense(e)} className="space-y-4 pt-2">
                     <div className="space-y-2">
                       <Label htmlFor="category">Category</Label>
                       <select

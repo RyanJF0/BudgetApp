@@ -2,6 +2,43 @@
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
+## Cloudflare Pages
+
+If the build succeeds but deploy fails with **Must specify a project name**, you likely set a **Deploy command** such as `npx wrangler pages deploy dist`. For Git-connected Pages, remove it:
+
+1. **Cloudflare Dashboard** → your **Pages** project → **Settings** → **Builds & deployments**.
+2. **Clear the Deploy command** (leave empty). Cloudflare publishes the build output directory automatically.
+3. Keep **Build command:** `npm run build` and **Build output directory:** `dist`.
+4. **Retry deployment** or push a new commit.
+
+Only use `wrangler pages deploy` from your machine or a custom pipeline if you intend to; then pass `--project-name=YOUR_PAGES_PROJECT_NAME` and the required auth.
+
+## Supabase (auth + data)
+
+Budget data (categories and expenses) is stored in Supabase per signed-in user.
+
+### 1. Create a project
+
+Create a project at [supabase.com](https://supabase.com). In **Settings → API**, copy the **Project URL** and **anon public** key.
+
+### 2. Auth settings
+
+- **Authentication → Providers → Email:** enable email sign-in (magic link).
+- **Authentication → URL configuration:** set **Site URL** to your deployed URL (and `http://localhost:5173` for local dev). Add the same URLs under **Redirect URLs**.
+
+### 3. Database
+
+In **SQL → New query**, run the script in [`supabase/migrations/001_init.sql`](supabase/migrations/001_init.sql) (creates `categories` and `expenses` tables plus RLS policies).
+
+### 4. Environment variables
+
+- **Local:** copy [`.env.example`](.env.example) to `.env.local` and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. Restart `npm run dev`.
+- **Cloudflare Pages:** add the same two variables (names must start with `VITE_`) in the project **Environment variables**, then redeploy.
+
+### 5. Usage
+
+Open the app, enter your email, use the magic link, then add expenses. Data persists across sessions for that account.
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
